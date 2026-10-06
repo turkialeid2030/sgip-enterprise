@@ -1,0 +1,39 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: sgip-sovereign-grc
+  namespace: argocd
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: sgip-production
+  source:
+    repoURL: https://github.com/sgip/sovereign-grc-os
+    targetRevision: main
+    path: infra/helm/sgip-api
+    helm:
+      releaseName: sgip-api
+      valueFiles: [values.yaml, values-production.yaml]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: sgip-production
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true, PrunePropagationPolicy=foreground]
+    retry:
+      limit: 3
+      backoff: {duration: 5s, factor: 2, maxDuration: 3m}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: sgip-production
+  namespace: argocd
+spec:
+  description: SGIP Sovereign GRC OS Production
+  sourceRepos: [https://github.com/sgip/sovereign-grc-os]
+  destinations:
+    - namespace: sgip-production
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - {group: "", kind: Namespace}
+    - {group: networking.k8s.io, kind: NetworkPolicy}

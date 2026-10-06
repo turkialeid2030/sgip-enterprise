@@ -1,0 +1,42 @@
+replicaCount: 3
+image:
+  repository: sgip/sovereign-grc-os
+  pullPolicy: Always
+  tag: "8.0"
+service:
+  type: ClusterIP
+  port: 4000
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: api.sgip.internal
+      paths: [{path: /, pathType: Prefix}]
+  tls:
+    - secretName: sgip-api-tls
+      hosts: [api.sgip.internal]
+resources:
+  requests: {memory: 512Mi, cpu: 250m}
+  limits:   {memory: 2Gi,   cpu: 2000m}
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 15
+  targetCPUUtilizationPercentage: 70
+env:
+  NODE_ENV: production
+  PORT: "4000"
+  OTEL_SERVICE_NAME: sgip-api
+  AUTONOMOUS_GOVERNANCE_ENABLED: "true"
+livenessProbe:
+  httpGet: {path: /health, port: 4000}
+  initialDelaySeconds: 30
+readinessProbe:
+  httpGet: {path: /health/ready, port: 4000}
+  initialDelaySeconds: 15
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2

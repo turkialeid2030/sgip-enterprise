@@ -1,0 +1,73 @@
+# SGIP OpenTelemetry Collector Configuration
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: "sgip-api"
+          scrape_interval: 15s
+          static_configs:
+            - targets: ["sgip-api:4000"]
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: production
+        action: upsert
+      - key: service.namespace
+        value: sgip-sovereign-grc
+        action: upsert
+
+  attributes:
+    actions:
+      - key: tenant_id
+        action: hash  # Hash tenant IDs in traces for privacy
+
+exporters:
+  otlp/jaeger:
+    endpoint: "http://jaeger:14250"
+    tls:
+      insecure: true
+
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: sgip_governance
+
+  logging:
+    loglevel: warn
+    sampling_initial: 10
+    sampling_thereafter: 50
+
+service:
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    traces:
+      receivers:  [otlp]
+      processors: [memory_limiter, batch, resource, attributes]
+      exporters:  [otlp/jaeger, logging]
+    metrics:
+      receivers:  [otlp, prometheus]
+      processors: [memory_limiter, batch]
+      exporters:  [prometheus]
+    logs:
+      receivers:  [otlp]
+      processors: [memory_limiter, batch]
+      exporters:  [logging]
