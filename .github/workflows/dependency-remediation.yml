@@ -6,6 +6,7 @@ on:
       - release/sgip-v4-qualification
     paths:
       - ".github/workflows/dependency-remediation.yml"
+      - "package.json"
   workflow_dispatch:
 
 permissions:
@@ -24,7 +25,9 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-      - name: Install locked dependencies
+      - name: Refresh lockfile from package policy
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Install refreshed dependencies
         run: npm ci --no-audit --no-fund
       - name: Apply only npm non-breaking audit remediations to lockfile
         shell: bash
