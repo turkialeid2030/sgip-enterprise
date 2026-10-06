@@ -162,7 +162,7 @@ describe("ThirdSectorAssessmentEngine — scoring", () => {
   it("emits a bilingual summary and a decision-support disclaimer", () => {
     const r = e.assess("ent-1", "waqf", all(4));
     expect(r.summary.ar).toMatch(/[\u0600-\u06FF]/);
-    expect(r.summary.en).toContain("Official-model score");
+    expect(r.summary.en).toContain("Evidence-verified score");
     expect(r.disclaimer.ar).toContain("لا يُعد شهادة امتثال");
     expect(r.disclaimer.en).toMatch(/not a compliance certification/i);
   });
