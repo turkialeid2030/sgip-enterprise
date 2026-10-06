@@ -238,7 +238,7 @@ describe("ApprovalRuntime", () => {
       ]),
     };
     (queryOne as jest.Mock).mockResolvedValueOnce(existingRequest);
-    (query as jest.Mock).mockResolvedValueOnce([]);
+    (query as jest.Mock).mockResolvedValueOnce([{ id: "req-001" }]);
 
     const result = await runtime.processDecision({
       ctx, requestId: "req-001", decision: "approved",
@@ -260,7 +260,7 @@ describe("ApprovalRuntime", () => {
       ]),
     };
     (queryOne as jest.Mock).mockResolvedValueOnce(existingRequest);
-    (query as jest.Mock).mockResolvedValueOnce([]);
+    (query as jest.Mock).mockResolvedValueOnce([{ id: "req-002" }]);
 
     const result = await runtime.processDecision({
       ctx, requestId: "req-002", decision: "approved",
@@ -281,7 +281,7 @@ describe("ApprovalRuntime", () => {
       ]),
     };
     (queryOne as jest.Mock).mockResolvedValueOnce(existingRequest);
-    (query as jest.Mock).mockResolvedValueOnce([]);
+    (query as jest.Mock).mockResolvedValueOnce([{ id: "req-003" }]);
 
     const result = await runtime.processDecision({
       ctx, requestId: "req-003", decision: "rejected",
