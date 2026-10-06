@@ -72,6 +72,8 @@ jobs:
     env:
       DATABASE_URL: postgresql://sgip_app:ci_app_only_ChangeMe123@localhost:5432/sgip_enterprise
       PGPASSWORD: ci_bootstrap_only
+      PGHOST: localhost
+      PGPORT: "5432"
       SGIP_ROOT: ${{ github.workspace }}
       SGIP_MIGRATIONS_DIR: ${{ github.workspace }}/db/migrations
     steps:
@@ -82,9 +84,7 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - name: Initialize SGIP roles
-        run: |
-          psql -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f infra/postgres/init.sql
-          bash infra/postgres/05-create-roles.sh
+        run: bash infra/postgres/05-create-roles.sh
       - name: Apply authoritative migrations
         run: bash infra/postgres/10-apply-migrations.sh
       - name: Create/verify app runtime role
