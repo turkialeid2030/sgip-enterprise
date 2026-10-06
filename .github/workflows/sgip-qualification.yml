@@ -1,0 +1,153 @@
+name: SGIP Production Qualification
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_error_contract_e2e:
+        description: "Run authoritative Error Contract E2E when harness/result assets are available"
+        required: false
+        default: "true"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sgip-qualification-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22"
+  POSTGRES_DB: sgip_enterprise
+  POSTGRES_USER: sgip_bootstrap
+  POSTGRES_PASSWORD: ci_bootstrap_only
+  APP_DB_PASSWORD: ci_app_only_ChangeMe123
+  MIGRATOR_DB_PASSWORD: ci_migrator_only_ChangeMe123
+  JWT_SECRET: ci_jwt_secret_ChangeMe_0123456789
+  JWT_REFRESH_SECRET: ci_refresh_secret_ChangeMe_0123456789
+  NODE_ENV: test
+
+jobs:
+  build-test:
+    name: Build, Typecheck, Static Guard, Jest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run verify:error-contract:static
+      - run: npx jest --runInBand --detectOpenHandles
+      - run: npm audit --audit-level=high
+
+  postgres-semantic:
+    name: PostgreSQL Migrations, Roles, RLS
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: build-test
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          APP_DB_PASSWORD: ${{ env.APP_DB_PASSWORD }}
+          MIGRATOR_DB_PASSWORD: ${{ env.MIGRATOR_DB_PASSWORD }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sgip_bootstrap -d sgip_enterprise"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://sgip_app:ci_app_only_ChangeMe123@localhost:5432/sgip_enterprise
+      PGPASSWORD: ci_bootstrap_only
+      SGIP_ROOT: ${{ github.workspace }}
+      SGIP_MIGRATIONS_DIR: ${{ github.workspace }}/db/migrations
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Initialize SGIP roles
+        run: |
+          psql -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f infra/postgres/init.sql
+          bash infra/postgres/05-create-roles.sh
+      - name: Apply authoritative migrations
+        run: bash infra/postgres/10-apply-migrations.sh
+      - name: Create/verify app runtime role
+        run: bash infra/postgres/20-create-app-role.sh
+      - name: Semantic PostgreSQL qualification
+        run: node tools/qualification/verify-postgres-target.cjs
+
+  error-contract-e2e:
+    name: Authoritative Error Contract E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    needs: [build-test, postgres-semantic]
+    if: ${{ github.event_name == 'pull_request' || inputs.run_error_contract_e2e == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Fail closed if authoritative harness is absent
+        run: |
+          test -f scripts/verify-error-contract-e2e.cjs || {
+            echo "BLOCKED: scripts/verify-error-contract-e2e.cjs is not committed." >&2
+            exit 1
+          }
+      - name: Execute authoritative runtime harness
+        run: node scripts/verify-error-contract-e2e.cjs
+      - name: Fail closed if machine-readable result is absent
+        run: |
+          test -f sgip_run_results.json || {
+            echo "BLOCKED: sgip_run_results.json was not produced." >&2
+            exit 1
+          }
+      - name: Exact machine-readable acceptance
+        run: node tools/qualification/verify-error-contract-results.cjs sgip_run_results.json
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sgip-error-contract-evidence-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            sgip_run_results.json
+            ERROR_CONTRACT_FINAL_EXECUTION_REPORT_SGIP.md
+            qualification-evidence/**
+
+  release-gate:
+    name: Release Gate
+    runs-on: ubuntu-24.04
+    if: always()
+    needs: [build-test, postgres-semantic, error-contract-e2e]
+    steps:
+      - name: Require every mandatory gate
+        env:
+          BUILD_TEST: ${{ needs.build-test.result }}
+          POSTGRES: ${{ needs.postgres-semantic.result }}
+          ERROR_CONTRACT: ${{ needs.error-contract-e2e.result }}
+        run: |
+          echo "build-test=$BUILD_TEST"
+          echo "postgres-semantic=$POSTGRES"
+          echo "error-contract-e2e=$ERROR_CONTRACT"
+          test "$BUILD_TEST" = success
+          test "$POSTGRES" = success
+          test "$ERROR_CONTRACT" = success
+          echo "SGIP_RELEASE_GATE=PASS"
