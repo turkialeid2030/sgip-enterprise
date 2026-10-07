@@ -30,7 +30,8 @@ const flags={
  RUNTIME_PROOF:runs.every(r=>!r.fatal)&&records.some(r=>r.id==="CROSS-TENANT-ROUTE"&&r.pass)&&records.some(r=>r.id==="CROSS-TENANT-RLS"&&r.pass)&&faults.length>=10?"PASS":"FAIL",
  ERROR_CONTRACT_CLOSED:"FALSE"
 };
-const zeroFlags=new Set(["RAW_ERROR_RESPONSE_EXPOSURES","PUBLIC_ENDPOINT_RAW_ERROR_LEAKS","KNOWN_ERROR_STATUS_MISMATCHES","CASE_EXPECTATION_MISMATCHES"]);\nconst all=Object.entries(flags).every(([k,v])=>{if(["ERROR_CONTRACT_CLOSED","DB_DOWN_INSTANCE","FAILING_RECORDS"].includes(k))return true;if(zeroFlags.has(k))return Number(v)===0;return String(v).toUpperCase()==="PASS"})&&flags.DB_DOWN_INSTANCE==="PASS"&&flags.FAILING_RECORDS===0;
+const zeroFlags=new Set(["RAW_ERROR_RESPONSE_EXPOSURES","PUBLIC_ENDPOINT_RAW_ERROR_LEAKS","KNOWN_ERROR_STATUS_MISMATCHES","CASE_EXPECTATION_MISMATCHES"]);
+const all=Object.entries(flags).every(([k,v])=>{if(["ERROR_CONTRACT_CLOSED","DB_DOWN_INSTANCE","FAILING_RECORDS"].includes(k))return true;if(zeroFlags.has(k))return Number(v)===0;return String(v).toUpperCase()==="PASS"})&&flags.DB_DOWN_INSTANCE==="PASS"&&flags.FAILING_RECORDS===0;
 flags.ERROR_CONTRACT_CLOSED=all?"TRUE":"FALSE";
 const result={meta:{runId:"v4-"+Date.now(),started:new Date().toISOString(),finished:new Date().toISOString(),commit:process.env.SGIP_EXPECTED_GIT_COMMIT||process.env.GITHUB_SHA||"n/a",node:process.version,mode:"sgip-v4-canonical-reconstructed",target:"SGIP Enterprise",harnessBasis:"historical runtime 20260927065050-D3A3 + closure matrix; reconstructed executable replacement"},flags,envRuns:runs};
 fs.writeFileSync(path.join(root,"sgip_run_results.json"),JSON.stringify(result,null,2));
