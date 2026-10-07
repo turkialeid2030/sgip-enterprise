@@ -5,13 +5,7 @@ version: "3.9"
 services:
   # ── Sovereign GRC API ────────────────────────────────────────
   sgip-api:
-    build:
-      context: ../..            # resolved from infra/docker
-      dockerfile: Dockerfile
-      target: production
-    image: sgip/sovereign-grc-os:latest
-    ports:
-      - "4000:4000"
+    image: "${SGIP_IMAGE_REPOSITORY:?SGIP_IMAGE_REPOSITORY required}:${SGIP_IMAGE_TAG:?SGIP_IMAGE_TAG required}"
     environment:
       NODE_ENV: production
       DATABASE_URL: "postgresql://sgip_app:${APP_DB_PASSWORD:?APP_DB_PASSWORD required}@postgres:5432/sgip_prod"  # runtime role, NOT the owner account
@@ -60,8 +54,6 @@ services:
       - ../../infra/postgres/05-create-roles.sh:/docker-entrypoint-initdb.d/05_roles.sh:ro
       - ../../db/migrations:/docker-entrypoint-initdb.d/migrations:ro
       - ../../infra/postgres/10-apply-migrations.sh:/docker-entrypoint-initdb.d/10_migrate.sh:ro
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sgip -d sgip_prod"]
       interval: 10s
@@ -72,9 +64,6 @@ services:
       - sgip-internal
     command: >
       postgres
-      -c ssl=on
-      -c ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem
-      -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key
       -c shared_preload_libraries=pg_stat_statements
       -c log_statement=all
       -c log_connections=on

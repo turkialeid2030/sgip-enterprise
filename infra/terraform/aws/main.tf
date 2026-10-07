@@ -5,13 +5,7 @@ terraform {
     kubernetes = { source = "hashicorp/kubernetes", version = "~> 2.24" }
     helm       = { source = "hashicorp/helm", version = "~> 2.12" }
   }
-  backend "s3" {
-    bucket         = "sgip-terraform-state"
-    key            = "production/terraform.tfstate"
-    region         = "me-south-1"
-    encrypt        = true
-    dynamodb_table = "sgip-terraform-locks"
-  }
+  backend "s3" {}
 }
 
 provider "aws" {
@@ -45,7 +39,7 @@ module "eks" {
   source                               = "terraform-aws-modules/eks/aws"
   version                              = "20.2.0"
   cluster_name                         = "sgip-${var.environment}"
-  cluster_version                      = "1.29"
+  cluster_version                      = var.eks_cluster_version
   vpc_id                               = module.vpc.vpc_id
   subnet_ids                           = module.vpc.private_subnets
   cluster_endpoint_public_access       = var.cluster_endpoint_public_access

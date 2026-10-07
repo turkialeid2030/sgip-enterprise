@@ -21,7 +21,7 @@ metadata:
   namespace: sgip-production
   labels:
     app: sgip-api
-    version: "8.0"
+    version: "v4"
     component: backend
 spec:
   replicas: 3
@@ -38,7 +38,7 @@ spec:
     metadata:
       labels:
         app: sgip-api
-        version: "8.0"
+        version: "v4"
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "4000"
@@ -55,8 +55,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sgip-api
-          image: sgip/sovereign-grc-os:8.0
-          imagePullPolicy: Always
+          image: ghcr.io/turkialeid2030/sgip-enterprise:qualification-placeholder
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 4000
               name: http
