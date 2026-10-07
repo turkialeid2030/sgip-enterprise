@@ -62,3 +62,5 @@ jobs:
           fi
 
 # Vite 8 compatibility retry
+
+# Oxc compatibility retry
