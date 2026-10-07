@@ -93,11 +93,36 @@ jobs:
         run: node tools/qualification/verify-postgres-target.cjs
 
   error-contract-e2e:
-    name: Authoritative Error Contract E2E
+    name: Canonical Error Contract E2E
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     needs: [build-test, postgres-semantic]
     if: ${{ github.event_name == 'pull_request' || inputs.run_error_contract_e2e == 'true' }}
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          APP_DB_PASSWORD: ${{ env.APP_DB_PASSWORD }}
+          MIGRATOR_DB_PASSWORD: ${{ env.MIGRATOR_DB_PASSWORD }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sgip_bootstrap -d sgip_enterprise"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://sgip_app:ci_app_only_ChangeMe123@localhost:5432/sgip_enterprise
+      ADMIN_DATABASE_URL: postgresql://sgip_bootstrap:ci_bootstrap_only@localhost:5432/sgip_enterprise
+      PGPASSWORD: ci_bootstrap_only
+      PGHOST: localhost
+      PGPORT: "5432"
+      SGIP_ROOT: ${{ github.workspace }}
+      SGIP_MIGRATIONS_DIR: ${{ github.workspace }}/db/migrations
+      SGIP_EXPECTED_GIT_COMMIT: ${{ github.event.pull_request.head.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -105,14 +130,20 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - name: Fail closed if authoritative harness is absent
+      - name: Initialize isolated PostgreSQL target
         run: |
-          test -f scripts/verify-error-contract-e2e.cjs || {
-            echo "BLOCKED: scripts/verify-error-contract-e2e.cjs is not committed." >&2
-            exit 1
-          }
-      - name: Execute authoritative runtime harness
-        run: node scripts/verify-error-contract-e2e.cjs
+          bash infra/postgres/05-create-roles.sh
+          bash infra/postgres/10-apply-migrations.sh
+          bash infra/postgres/20-create-app-role.sh
+          node tools/qualification/verify-postgres-target.cjs
+      - name: Development error-contract matrix
+        run: NODE_ENV=development node scripts/error-contract-e2e-runtime.cjs development
+      - name: Production error-contract matrix
+        run: NODE_ENV=production node scripts/error-contract-e2e-runtime.cjs production
+      - name: Database-down fail-closed matrix
+        run: node scripts/error-contract-e2e-runtime.cjs db-down
+      - name: Aggregate exact closure result
+        run: node scripts/aggregate-error-contract-results.cjs
       - name: Fail closed if machine-readable result is absent
         run: |
           test -f sgip_run_results.json || {
