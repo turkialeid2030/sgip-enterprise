@@ -15,7 +15,9 @@ FROM node:22-alpine AS production
 WORKDIR /app
 RUN apk add --no-cache curl dumb-init \
   && addgroup -g 1001 -S sgip \
-  && adduser -S sgip -u 1001 -G sgip
+  && adduser -S sgip -u 1001 -G sgip \
+  && rm -rf /usr/local/lib/node_modules/npm \
+  && rm -f /usr/local/bin/npm /usr/local/bin/npx
 
 COPY --from=builder --chown=sgip:sgip /app/dist ./dist
 COPY --from=builder --chown=sgip:sgip /app/node_modules ./node_modules
