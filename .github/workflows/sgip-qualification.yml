@@ -1,6 +1,8 @@
 name: SGIP Production Qualification
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -30,14 +32,14 @@ env:
 
 jobs:
   build-test:
-    name: Build, Typecheck, Static Guard, Jest
+    name: Build, Typecheck, Guards, Jest
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -45,6 +47,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm run verify:error-contract:static
+      - run: npm run verify:deployment
       - run: npx jest --runInBand --detectOpenHandles
       - run: npm audit --audit-level=high
 
@@ -77,8 +80,8 @@ jobs:
       SGIP_ROOT: ${{ github.workspace }}
       SGIP_MIGRATIONS_DIR: ${{ github.workspace }}/db/migrations
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -92,12 +95,95 @@ jobs:
       - name: Semantic PostgreSQL qualification
         run: node tools/qualification/verify-postgres-target.cjs
 
+  container-smoke:
+    name: Production Container, Trivy, Readiness
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    needs: [build-test, postgres-semantic]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          APP_DB_PASSWORD: ${{ env.APP_DB_PASSWORD }}
+          MIGRATOR_DB_PASSWORD: ${{ env.MIGRATOR_DB_PASSWORD }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sgip_bootstrap -d sgip_enterprise"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://sgip_app:ci_app_only_ChangeMe123@127.0.0.1:5432/sgip_enterprise
+      PGPASSWORD: ci_bootstrap_only
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      SGIP_MIGRATIONS_DIR: ${{ github.workspace }}/db/migrations
+    steps:
+      - uses: actions/checkout@v7
+      - name: Initialize isolated PostgreSQL target
+        run: |
+          bash infra/postgres/05-create-roles.sh
+          bash infra/postgres/10-apply-migrations.sh
+          bash infra/postgres/20-create-app-role.sh
+      - name: Build production image
+        run: docker build --pull --target production -t "sgip-ci:${GITHUB_SHA}" .
+      - name: Verify immutable runtime contents
+        run: |
+          test "$(docker inspect -f '{{.Config.User}}' "sgip-ci:${GITHUB_SHA}")" = "sgip"
+          docker run --rm --entrypoint sh "sgip-ci:${GITHUB_SHA}" -c 'test -f /app/db/migrations/006_rls_complete.sql'
+      - name: Trivy image gate
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$HOME/.cache/trivy:/root/.cache/" \
+            aquasec/trivy:0.75.0 image \
+            --exit-code 1 --severity HIGH,CRITICAL --no-progress \
+            "sgip-ci:${GITHUB_SHA}"
+      - name: Start production container
+        run: |
+          docker run -d --name sgip-smoke --network host \
+            -e NODE_ENV=production \
+            -e PORT=4000 \
+            -e DATABASE_URL="$DATABASE_URL" \
+            -e JWT_SECRET="$JWT_SECRET" \
+            -e JWT_REFRESH_SECRET="$JWT_REFRESH_SECRET" \
+            "sgip-ci:${GITHUB_SHA}"
+      - name: Verify readiness attestation
+        run: |
+          set -euo pipefail
+          body=""
+          for i in $(seq 1 60); do
+            if body=$(curl --fail --silent http://127.0.0.1:4000/health/ready 2>/dev/null); then
+              break
+            fi
+            sleep 1
+          done
+          echo "$body"
+          BODY="$body" node -e '
+            const j=JSON.parse(process.env.BODY||"{}");
+            if(j.ready!==true) throw new Error("readiness is not true");
+            const a=j.attestation||{};
+            for(const k of ["migrationsVerified","rlsVerified","roleVerified"]) {
+              if(a[k]!==true) throw new Error("attestation failed: "+k);
+            }
+            if(a.role!=="sgip_app") throw new Error("unexpected runtime DB role: "+a.role);
+          '
+      - name: Container diagnostics
+        if: always()
+        run: |
+          docker logs sgip-smoke 2>&1 || true
+          docker rm -f sgip-smoke >/dev/null 2>&1 || true
+
   error-contract-e2e:
     name: Canonical Error Contract E2E
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     needs: [build-test, postgres-semantic]
-    if: ${{ github.event_name == 'pull_request' || inputs.run_error_contract_e2e == 'true' }}
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' || inputs.run_error_contract_e2e == 'true' }}
     services:
       postgres:
         image: postgres:16
@@ -122,10 +208,10 @@ jobs:
       PGPORT: "5432"
       SGIP_ROOT: ${{ github.workspace }}
       SGIP_MIGRATIONS_DIR: ${{ github.workspace }}/db/migrations
-      SGIP_EXPECTED_GIT_COMMIT: ${{ github.event.pull_request.head.sha }}
+      SGIP_EXPECTED_GIT_COMMIT: ${{ github.sha }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -154,7 +240,7 @@ jobs:
         run: node tools/qualification/verify-error-contract-results.cjs sgip_run_results.json
       - name: Upload qualification evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sgip-error-contract-evidence-${{ github.sha }}
           if-no-files-found: warn
@@ -167,18 +253,21 @@ jobs:
     name: Release Gate
     runs-on: ubuntu-24.04
     if: always()
-    needs: [build-test, postgres-semantic, error-contract-e2e]
+    needs: [build-test, postgres-semantic, container-smoke, error-contract-e2e]
     steps:
       - name: Require every mandatory gate
         env:
           BUILD_TEST: ${{ needs.build-test.result }}
           POSTGRES: ${{ needs.postgres-semantic.result }}
+          CONTAINER_SMOKE: ${{ needs.container-smoke.result }}
           ERROR_CONTRACT: ${{ needs.error-contract-e2e.result }}
         run: |
           echo "build-test=$BUILD_TEST"
           echo "postgres-semantic=$POSTGRES"
+          echo "container-smoke=$CONTAINER_SMOKE"
           echo "error-contract-e2e=$ERROR_CONTRACT"
           test "$BUILD_TEST" = success
           test "$POSTGRES" = success
+          test "$CONTAINER_SMOKE" = success
           test "$ERROR_CONTRACT" = success
           echo "SGIP_RELEASE_GATE=PASS"
