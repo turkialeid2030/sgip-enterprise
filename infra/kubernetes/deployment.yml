@@ -1,6 +1,6 @@
-# SGIP Sovereign GRC OS — Kubernetes Deployment
-# Usage: kubectl apply -f infra/kubernetes/
-# Requires: kubectl, Kubernetes 1.28+, cert-manager, Ingress controller
+# SGIP Sovereign GRC OS — Kubernetes production baseline
+# Secrets referenced below MUST be provisioned out-of-band (AWS Secrets Manager /
+# External Secrets / sealed secret). Never commit secret values to this repository.
 
 ---
 apiVersion: v1
@@ -9,10 +9,11 @@ metadata:
   name: sgip-production
   labels:
     name: sgip-production
-    security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
 
 ---
-# Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,10 +25,11 @@ metadata:
     component: backend
 spec:
   replicas: 3
+  revisionHistoryLimit: 5
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 1
+      maxUnavailable: 0
       maxSurge: 1
   selector:
     matchLabels:
@@ -43,10 +45,14 @@ spec:
         prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: sgip-api
+      terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1000
-        fsGroup: 2000
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: sgip-api
           image: sgip/sovereign-grc-os:8.0
@@ -57,6 +63,10 @@ spec:
           env:
             - name: NODE_ENV
               value: production
+            - name: PORT
+              value: "4000"
+            - name: SGIP_MIGRATIONS_DIR
+              value: /app/db/migrations
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -67,15 +77,37 @@ spec:
                 secretKeyRef:
                   name: sgip-secrets
                   key: jwt-secret
+            - name: JWT_REFRESH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: sgip-secrets
+                  key: jwt-refresh-secret
             - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: sgip-secrets
                   key: anthropic-api-key
+                  optional: true
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: sgip-secrets
+                  key: redis-url
+                  optional: true
+            - name: KAFKA_BROKERS
+              valueFrom:
+                secretKeyRef:
+                  name: sgip-secrets
+                  key: kafka-brokers
+                  optional: true
             - name: OTEL_SERVICE_NAME
               value: sgip-api
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: http://otel-collector:4317
+              valueFrom:
+                secretKeyRef:
+                  name: sgip-secrets
+                  key: otel-endpoint
+                  optional: true
           resources:
             requests:
               memory: "512Mi"
@@ -89,6 +121,7 @@ spec:
               port: 4000
             initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 5
             failureThreshold: 3
           readinessProbe:
             httpGet:
@@ -96,6 +129,7 @@ spec:
               port: 4000
             initialDelaySeconds: 15
             periodSeconds: 5
+            timeoutSeconds: 5
             failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
@@ -104,7 +138,6 @@ spec:
               drop: ["ALL"]
 
 ---
-# Service
 apiVersion: v1
 kind: Service
 metadata:
@@ -120,7 +153,6 @@ spec:
   type: ClusterIP
 
 ---
-# HorizontalPodAutoscaler
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -133,6 +165,9 @@ spec:
     name: sgip-api
   minReplicas: 3
   maxReplicas: 10
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
   metrics:
     - type: Resource
       resource:
@@ -148,7 +183,6 @@ spec:
           averageUtilization: 80
 
 ---
-# NetworkPolicy — Zero Trust
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -158,48 +192,49 @@ spec:
   podSelector:
     matchLabels:
       app: sgip-api
-  policyTypes:
-    - Ingress
-    - Egress
+  policyTypes: [Ingress, Egress]
   ingress:
     - from:
         - namespaceSelector:
             matchLabels:
-              name: ingress-nginx
+              kubernetes.io/metadata.name: ingress-nginx
       ports:
-        - port: 4000
+        - protocol: TCP
+          port: 4000
   egress:
+    # DNS
     - to:
-        - podSelector:
+        - namespaceSelector:
             matchLabels:
-              app: postgres
+              kubernetes.io/metadata.name: kube-system
       ports:
-        - port: 5432
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    # Private VPC services (RDS/MSK/Redis/OTel); align with Terraform VPC CIDR.
     - to:
-        - podSelector:
-            matchLabels:
-              app: kafka
+        - ipBlock:
+            cidr: 10.0.0.0/16
       ports:
-        - port: 9092
+        - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 9094 }
+        - { protocol: TCP, port: 6379 }
+        - { protocol: TCP, port: 4317 }
+    # External HTTPS (AI provider / package-integrated external APIs).
     - to:
-        - podSelector:
-            matchLabels:
-              app: redis
+        - ipBlock:
+            cidr: 0.0.0.0/0
       ports:
-        - port: 6379
+        - { protocol: TCP, port: 443 }
 
 ---
-# ServiceAccount
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: sgip-api
   namespace: sgip-production
-  annotations:
-    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/sgip-api-role"  # For AWS EKS IRSA
+automountServiceAccountToken: false
 
 ---
-# PodDisruptionBudget
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
