@@ -1,0 +1,213 @@
+// SGIP Enterprise — Prisma Schema
+// Maps directly to UGOM entity types
+// Production: PostgreSQL with Row-Level Security per tenantId
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Tenant isolation ──────────────────────────────────────────
+model Tenant {
+  id            String   @id @default(uuid())
+  name          String
+  slug          String   @unique
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  users         User[]
+  entities      GovernanceEntity[]
+  graphEdges    GraphEdge[]
+  auditLogs     AuditLog[]
+  memoryEntries MemoryEntry[]
+}
+
+// ── Users & Auth ──────────────────────────────────────────────
+model User {
+  id           String   @id @default(uuid())
+  email        String
+  passwordHash String
+  nameAr       String
+  role         String   // matches AgentId roles
+  isActive     Boolean  @default(true)
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  lastLoginAt  DateTime?
+
+  @@unique([email, tenantId])
+  @@index([tenantId])
+}
+
+// ── Core UGOM Entity (polymorphic) ───────────────────────────
+model GovernanceEntity {
+  id                   String   @id @default(uuid())
+  type                 String   // UGOMType
+  title                String
+  description          String?
+  owner                String
+  ownerId              String?
+  department           String?
+  departmentId         String?
+  status               String   @default("draft")
+  priority             String   @default("medium")
+  riskLevel            String   @default("medium")
+  impactLevel          String   @default("medium")
+
+  // Impact
+  financialImpactJson  Json?    // FinancialImpact
+  legalImpact          String?
+  complianceImpact     String?
+  reputationalImpact   String?
+
+  // Lifecycle
+  reviewDate           DateTime?
+  dueDate              DateTime?
+  closedDate           DateTime?
+
+  // Governance chains (JSON arrays)
+  escalationPathJson   Json     @default("[]")
+  approvalChainJson    Json     @default("[]")
+
+  // Security
+  confidentiality      String   @default("internal")
+  evidenceSufficiency  Float?
+  confidenceScore      Float?
+
+  // Domain-specific extra fields (type-safe per entity type)
+  dataJson             Json     @default("{}")
+
+  // Linked entity IDs (denormalized for quick reads; graph has authoritative edges)
+  linkedPolicies       String[] @default([])
+  linkedRisks          String[] @default([])
+  linkedControls       String[] @default([])
+  linkedEvidence       String[] @default([])
+  linkedRegulations    String[] @default([])
+  linkedFindings       String[] @default([])
+  linkedCAPAs          String[] @default([])
+  linkedDecisions      String[] @default([])
+  linkedObligations    String[] @default([])
+
+  tags                 String[] @default([])
+  version              Int      @default(1)
+  tenantId             String
+  organizationId       String   @default("default")
+  createdBy            String
+  updatedBy            String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  tenant               Tenant   @relation(fields: [tenantId], references: [id])
+  fromEdges            GraphEdge[] @relation("FromEntity")
+  toEdges              GraphEdge[] @relation("ToEntity")
+  auditLogs            AuditLog[]
+
+  @@index([tenantId, type])
+  @@index([tenantId, status])
+  @@index([tenantId, type, status])
+}
+
+// ── Sovereign Knowledge Graph edges ──────────────────────────
+model GraphEdge {
+  id           String   @id @default(uuid())
+  fromId       String
+  fromType     String
+  toId         String
+  toType       String
+  relationship String   // RelationshipType
+  weight       Float    @default(5)
+  propertiesJson Json   @default("{}")
+  isInferred   Boolean  @default(false)
+  tenantId     String
+  createdBy    String
+  createdAt    DateTime @default(now())
+
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  fromEntity   GovernanceEntity @relation("FromEntity", fields: [fromId], references: [id], onDelete: Cascade)
+  toEntity     GovernanceEntity @relation("ToEntity",   fields: [toId],   references: [id], onDelete: Cascade)
+
+  @@unique([fromId, toId, relationship])
+  @@index([tenantId, relationship])
+  @@index([fromId])
+  @@index([toId])
+}
+
+// ── Immutable Audit Log ────────────────────────────────────────
+model AuditLog {
+  id             String   @id @default(uuid())
+  entityId       String?
+  entityType     String?
+  action         String
+  performedBy    String
+  role           String   @default("system")
+  previousValue  Json?
+  newValue       Json?
+  traceId        String
+  tenantId       String
+  createdAt      DateTime @default(now())
+
+  tenant         Tenant   @relation(fields: [tenantId], references: [id])
+  entity         GovernanceEntity? @relation(fields: [entityId], references: [id])
+
+  @@index([tenantId, action])
+  @@index([entityId])
+  @@index([tenantId, createdAt])
+}
+
+// ── Governance Memory ──────────────────────────────────────────
+model MemoryEntry {
+  id               String   @id @default(uuid())
+  type             String   // MemoryType
+  title            String
+  summary          String
+  source           String
+  sourceEntityId   String?
+  sourceEntityType String?
+  relatedEntityIds String[] @default([])
+  importance       String   @default("medium")
+  tags             String[] @default([])
+  confidenceScore  Float    @default(75)
+  retrievalCount   Int      @default(0)
+  version          Int      @default(1)
+  expiresAt        DateTime?
+  tenantId         String
+  isArchived       Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant           Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, type])
+  @@index([tenantId, importance])
+}
+
+// ── Agent Outputs ──────────────────────────────────────────────
+model AgentOutput {
+  id                      String   @id @default(uuid())
+  agentId                 String
+  outputType              String
+  inputSummary            String
+  outputJson              Json
+  confidenceScore         Float
+  evidenceRefs            String[] @default([])
+  hallucinationCheckPassed Boolean @default(false)
+  requiresHumanReview     Boolean  @default(false)
+  reviewerStatus          String   @default("pending")
+  reviewedBy              String?
+  reviewedAt              DateTime?
+  modelName               String
+  promptVersion           String   @default("1.0")
+  traceId                 String
+  sessionId               String
+  tenantId                String
+  createdAt               DateTime @default(now())
+
+  @@index([tenantId, agentId])
+  @@index([tenantId, reviewerStatus])
+}

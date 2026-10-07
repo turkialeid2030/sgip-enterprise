@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./"
+  },
+  "include": [
+    "api/**/*",
+    "types/**/*",
+    "schemas/**/*",
+    "contracts/**/*",
+    "graph/**/*",
+    "core/**/*",
+    "orchestration/**/*",
+    "governance-memory/**/*",
+    "audit/**/*",
+    "agents/**/*",
+    "modules/**/*",
+    "prisma/seed.ts"
+  ]
+}

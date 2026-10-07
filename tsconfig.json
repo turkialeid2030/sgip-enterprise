@@ -1,0 +1,99 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": [
+      "ES2022"
+    ],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": "./",
+    "baseUrl": ".",
+    "paths": {
+      "@sgip/types": [
+        "./types/index.ts"
+      ],
+      "@sgip/schemas": [
+        "./schemas/index.ts"
+      ],
+      "@sgip/contracts": [
+        "./contracts/index.ts"
+      ],
+      "@sgip/shared": [
+        "./shared/index.ts"
+      ],
+      "@sgip/graph": [
+        "./graph/index.ts"
+      ],
+      "@sgip/core": [
+        "./core/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "types/**/*",
+    "schemas/**/*",
+    "contracts/**/*",
+    "shared/**/*",
+    "graph/**/*",
+    "core/**/*",
+    "orchestration/**/*",
+    "governance-memory/**/*",
+    "audit/**/*",
+    "agents/**/*",
+    "modules/**/*",
+    "api/**/*",
+    "prisma/**/*",
+    "tests/**/*",
+    "tenant/**/*",
+    "policy-engine/**/*",
+    "evidence/**/*",
+    "observability/**/*",
+    "event-governance/**/*",
+    "frameworks/**/*",
+    "controls/**/*",
+    "assessments/**/*",
+    "compliance/**/*",
+    "mappings/**/*",
+    "governance/**/*",
+    "sovereign-memory/**/*",
+    "cognitive/**/*",
+    "stakeholder-intelligence/**/*",
+    "governance-ontology/**/*",
+    "sceos-runtime/**/*",
+    "runtime/**/*",
+    "evals/**/*",
+    "dashboards/**/*",
+    "digital-twin/**/*",
+    "process-mining/**/*",
+    "governance-runtime/**/*",
+    "risk-runtime/**/*",
+    "compliance-runtime/**/*",
+    "resilience-runtime/**/*",
+    "ai-governance-runtime/**/*",
+    "assurance-runtime/**/*",
+    "analytics-runtime/**/*",
+    "grc-ontology/**/*",
+    "audit-runtime/**/*",
+    "governance-maturity/**/*",
+    "sovereign-knowledge-graph/**/*",
+    "legal-governance/**/*",
+    "sector-packs/**/*",
+    "cyber-governance/**/*",
+    "autonomous-governance/**/*",
+    "devsecops-governance/**/*",
+    "runtime/kafka/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "ui-shell"
+  ]
+}

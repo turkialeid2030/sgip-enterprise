@@ -1,0 +1,70 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sgip_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       sgip_enterprise
+      POSTGRES_USER:     sgip_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      APP_DB_PASSWORD:   ${APP_DB_PASSWORD:?APP_DB_PASSWORD required by 05-create-roles.sh}
+      MIGRATOR_DB_PASSWORD: ${MIGRATOR_DB_PASSWORD:?MIGRATOR_DB_PASSWORD required}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/05-create-roles.sh:/docker-entrypoint-initdb.d/05_roles.sh:ro
+      - ./db/migrations:/docker-entrypoint-initdb.d/migrations:ro
+      - ./infra/postgres/10-apply-migrations.sh:/docker-entrypoint-initdb.d/10_migrate.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sgip_admin -d sgip_enterprise"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: sgip_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sgip_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV:          production
+      DATABASE_URL:      postgresql://sgip_app:${APP_DB_PASSWORD:?APP_DB_PASSWORD required}@postgres:5432/sgip_enterprise  # runtime role: NOSUPERUSER NOBYPASSRLS, not owner
+      REDIS_URL: "redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379"
+      JWT_SECRET:        ${JWT_SECRET:?JWT_SECRET required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET required}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      PORT:              4000
+      TENANT_ID:         tenant-001
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    command: npm run start:prod
+
+volumes:
+  pgdata:
+  redisdata:
