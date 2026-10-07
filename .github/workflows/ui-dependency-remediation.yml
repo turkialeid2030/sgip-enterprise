@@ -6,7 +6,6 @@ on:
       - release/sgip-v4-production-hardening
     paths:
       - ".github/workflows/ui-dependency-remediation.yml"
-      - "ui-shell/package.json"
   workflow_dispatch:
 
 permissions:
@@ -30,19 +29,25 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: ui-shell/package-lock.json
-      - name: Refresh UI lockfile
+      - name: Upgrade Vite security boundary
         working-directory: ui-shell
-        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-      - name: Apply non-breaking audit remediations
+        run: npm install --save-dev --package-lock-only --ignore-scripts --no-audit --no-fund vite@8.3.3 @vitejs/plugin-react@latest
+      - name: Apply remaining non-breaking fixes
         working-directory: ui-shell
-        shell: bash
-        run: |
-          set +e
-          npm audit fix --package-lock-only --ignore-scripts
-          rc=$?
-          set -e
-          echo "npm audit fix exit=$rc; final gate below decides acceptance"
-      - name: Commit dependency remediation
+        run: npm audit fix --package-lock-only --ignore-scripts --no-audit || true
+      - name: Verify clean install
+        working-directory: ui-shell
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck UI
+        working-directory: ui-shell
+        run: npm run typecheck
+      - name: Build UI
+        working-directory: ui-shell
+        run: npm run build
+      - name: Require zero high or critical UI advisories
+        working-directory: ui-shell
+        run: npm audit --audit-level=high
+      - name: Commit verified UI dependency upgrade
         shell: bash
         run: |
           set -euo pipefail
@@ -50,14 +55,8 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
           git add ui-shell/package.json ui-shell/package-lock.json
           if git diff --cached --quiet; then
-            echo "No UI dependency changes available."
+            echo "No dependency changes to commit."
           else
-            git commit -m "security: remediate UI high-risk dependencies"
+            git commit -m "security: upgrade Vite toolchain"
             git push origin HEAD:release/sgip-v4-production-hardening
           fi
-      - name: Verify clean install
-        working-directory: ui-shell
-        run: npm ci --no-audit --no-fund
-      - name: Require zero high or critical UI advisories
-        working-directory: ui-shell
-        run: npm audit --audit-level=high
