@@ -48,9 +48,9 @@ module "eks" {
   cluster_version = "1.29"
   vpc_id          = module.vpc.vpc_id
   subnet_ids      = module.vpc.private_subnets
-  cluster_endpoint_public_access       = true
+  cluster_endpoint_public_access       = var.cluster_endpoint_public_access
   cluster_endpoint_private_access      = true
-  cluster_endpoint_public_access_cidrs = var.allowed_cidr_blocks
+  cluster_endpoint_public_access_cidrs = var.cluster_endpoint_public_access ? var.allowed_cidr_blocks : []
   cluster_addons = {
     coredns            = { most_recent = true }
     kube-proxy         = { most_recent = true }
@@ -155,8 +155,40 @@ resource "aws_security_group" "kafka" {
   }
 }
 
+
+resource "aws_ecr_repository" "sgip_api" {
+  name                 = "sgip/sovereign-grc-os"
+  image_tag_mutability = "IMMUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+}
+
+resource "aws_ecr_lifecycle_policy" "sgip_api" {
+  repository = aws_ecr_repository.sgip_api.name
+  policy = jsonencode({
+    rules = [{
+      rulePriority = 1
+      description  = "Retain the 30 most recent production images"
+      selection = {
+        tagStatus   = "any"
+        countType   = "imageCountMoreThan"
+        countNumber = 30
+      }
+      action = { type = "expire" }
+    }]
+  })
+}
+
 output "cluster_endpoint"        { value = module.eks.cluster_endpoint        }
 output "cluster_name"            { value = module.eks.cluster_name            }
 output "rds_endpoint"            { value = module.rds.db_instance_endpoint    }
 output "kafka_brokers"           { value = aws_msk_cluster.governance_events.bootstrap_brokers_tls }
 output "vpc_id"                  { value = module.vpc.vpc_id                  }
+
+output "ecr_repository_url" { value = aws_ecr_repository.sgip_api.repository_url }
