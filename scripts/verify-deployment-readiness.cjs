@@ -15,6 +15,7 @@ add("DOCKER_TYPECHECK_BEFORE_BUILD", /npm run typecheck[\s\S]*npm run build/.tes
 add("DOCKER_MIGRATIONS_INCLUDED", /\/app\/db\/migrations \.\/db\/migrations/.test(docker));
 add("DOCKER_LOCKFILE_INCLUDED", /package-lock\.json/.test(docker));
 add("DOCKER_NON_ROOT", /USER sgip/.test(docker));
+add("DOCKER_RUNTIME_NPM_REMOVED", /rm -rf \/usr\/local\/lib\/node_modules\/npm/.test(docker));
 add("DOCKER_READINESS_HEALTHCHECK", /\/health\/ready/.test(docker));
 
 const prodCompose = read("infra/docker/docker-compose.prod.yml");
