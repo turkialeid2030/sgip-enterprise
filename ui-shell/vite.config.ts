@@ -1,18 +1,21 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import path from "path";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   plugins: [react()],
   build: {
-    outDir:      "dist",
-    sourcemap:   false,
-    minify:      "esbuild",
+    outDir: "dist",
+    sourcemap: false,
+    minify: "esbuild",
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
       output: {
-        manualChunks: {
-          react:     ["react", "react-dom"],
+        manualChunks(id) {
+          if (id.includes("node_modules/react") || id.includes("node_modules/react-dom")) {
+            return "react";
+          }
+          return undefined;
         },
       },
     },
@@ -21,12 +24,12 @@ export default defineConfig({
     port: 3001,
     proxy: {
       "/api": {
-        target:      "http://localhost:4000",
+        target: "http://localhost:4000",
         changeOrigin: true,
       },
     },
   },
   resolve: {
-    alias: { "@": path.resolve(__dirname, "src") },
+    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
 });
