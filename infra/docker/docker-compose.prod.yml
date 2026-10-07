@@ -9,7 +9,7 @@ services:
       context: ../..            # resolved from infra/docker
       dockerfile: Dockerfile
       target: production
-    image: sgip/sovereign-grc-os:latest
+    image: ghcr.io/turkialeid2030/sgip-enterprise:${SGIP_IMAGE_TAG:?SGIP_IMAGE_TAG required}
     ports:
       - "4000:4000"
     environment:
@@ -42,7 +42,7 @@ services:
       - sgip-external
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.sgip-api.rule=Host(`api.sgip.internal`)"
+      - "traefik.http.routers.sgip-api.rule=Host(`${SGIP_API_HOST:?SGIP_API_HOST required}`)"
       - "traefik.http.routers.sgip-api.tls=true"
 
   # ── PostgreSQL HA Primary ─────────────────────────────────────
@@ -72,9 +72,6 @@ services:
       - sgip-internal
     command: >
       postgres
-      -c ssl=on
-      -c ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem
-      -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key
       -c shared_preload_libraries=pg_stat_statements
       -c log_statement=all
       -c log_connections=on
@@ -122,7 +119,7 @@ services:
 
   # ── OpenTelemetry Collector ───────────────────────────────────
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: otel/opentelemetry-collector-contrib:${OTEL_COLLECTOR_TAG:?OTEL_COLLECTOR_TAG required}
     volumes:
       - ../../infra/observability/otel-config.yml:/etc/otel/config.yml
     command: ["--config=/etc/otel/config.yml"]
@@ -136,7 +133,7 @@ services:
 
   # ── Prometheus ────────────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:${PROMETHEUS_TAG:?PROMETHEUS_TAG required}
     volumes:
       - ../../infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
@@ -148,7 +145,7 @@ services:
 
   # ── Grafana ────────────────────────────────────────────────────
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:${GRAFANA_TAG:?GRAFANA_TAG required}
     environment:
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD}"
       GF_INSTALL_PLUGINS: grafana-clock-panel
