@@ -1,6 +1,8 @@
 name: SGIP Release Hardening
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -147,6 +149,8 @@ jobs:
           JWT_REFRESH_SECRET: dummy_refresh_secret_0123456789
           ANTHROPIC_API_KEY: ""
           GRAFANA_PASSWORD: dummy
+          SGIP_IMAGE_REPOSITORY: ghcr.io/turkialeid2030/sgip-enterprise
+          SGIP_IMAGE_TAG: qualification-placeholder
         run: docker compose -f infra/docker/docker-compose.prod.yml config --quiet
       - name: Kubernetes YAML parse
         run: ruby -e 'require "yaml"; YAML.load_stream(File.read("infra/kubernetes/deployment.yml")); puts "KUBERNETES_YAML_PARSE=PASS"'
