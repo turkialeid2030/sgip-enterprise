@@ -130,7 +130,7 @@ jobs:
         with:
           terraform_version: "1.9.8"
       - name: Terraform format
-        run: terraform fmt -check -recursive infra/terraform/aws
+        run: terraform fmt -check -diff -recursive infra/terraform/aws
       - name: Terraform init without backend
         working-directory: infra/terraform/aws
         run: terraform init -backend=false -input=false
