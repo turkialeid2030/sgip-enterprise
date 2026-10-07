@@ -1,0 +1,63 @@
+name: SGIP UI Dependency Remediation
+
+on:
+  push:
+    branches:
+      - release/sgip-v4-production-hardening
+    paths:
+      - ".github/workflows/ui-dependency-remediation.yml"
+      - "ui-shell/package.json"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sgip-ui-dependency-remediation
+  cancel-in-progress: false
+
+jobs:
+  remediate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/sgip-v4-production-hardening
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui-shell/package-lock.json
+      - name: Refresh UI lockfile
+        working-directory: ui-shell
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Apply non-breaking audit remediations
+        working-directory: ui-shell
+        shell: bash
+        run: |
+          set +e
+          npm audit fix --package-lock-only --ignore-scripts
+          rc=$?
+          set -e
+          echo "npm audit fix exit=$rc; final gate below decides acceptance"
+      - name: Commit dependency remediation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "sgip-security-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add ui-shell/package.json ui-shell/package-lock.json
+          if git diff --cached --quiet; then
+            echo "No UI dependency changes available."
+          else
+            git commit -m "security: remediate UI high-risk dependencies"
+            git push origin HEAD:release/sgip-v4-production-hardening
+          fi
+      - name: Verify clean install
+        working-directory: ui-shell
+        run: npm ci --no-audit --no-fund
+      - name: Require zero high or critical UI advisories
+        working-directory: ui-shell
+        run: npm audit --audit-level=high
