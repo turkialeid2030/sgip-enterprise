@@ -17,6 +17,11 @@ add("DOCKER_LOCKFILE_INCLUDED", /package-lock\.json/.test(docker));
 add("DOCKER_NON_ROOT", /USER sgip/.test(docker));
 add("DOCKER_READINESS_HEALTHCHECK", /\/health\/ready/.test(docker));
 
+const prodCompose = read("infra/docker/docker-compose.prod.yml");
+add("PROD_COMPOSE_IMMUTABLE_APP_TAG", /SGIP_IMAGE_TAG:\?SGIP_IMAGE_TAG required/.test(prodCompose));
+add("PROD_COMPOSE_NO_APP_LATEST", !/sgip\/sovereign-grc-os:latest/.test(prodCompose));
+add("PROD_COMPOSE_NO_SNAKEOIL_TLS", !/ssl-cert-snakeoil/.test(prodCompose));
+
 const k8s = read("infra/kubernetes/deployment.yml");
 add("K8S_RESTRICTED_POD_SECURITY", /pod-security\.kubernetes\.io\/enforce:\s*restricted/.test(k8s));
 add("K8S_UID_MATCHES_IMAGE", /runAsUser:\s*1001/.test(k8s) && /runAsGroup:\s*1001/.test(k8s));
