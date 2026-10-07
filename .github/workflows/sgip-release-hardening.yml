@@ -1,0 +1,172 @@
+name: SGIP Release Hardening
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  POSTGRES_DB: sgip_release
+  POSTGRES_USER: sgip_bootstrap
+  POSTGRES_PASSWORD: release_bootstrap_only
+  APP_DB_PASSWORD: release_app_only_ChangeMe123
+  MIGRATOR_DB_PASSWORD: release_migrator_only_ChangeMe123
+  JWT_SECRET: release_jwt_secret_ChangeMe_0123456789
+  JWT_REFRESH_SECRET: release_refresh_secret_ChangeMe_0123456789
+
+jobs:
+  app-and-ui:
+    name: Backend and UI production builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Backend clean install
+        run: npm ci --no-audit --no-fund
+      - name: Backend typecheck
+        run: npm run typecheck
+      - name: Backend production build
+        run: npm run build
+      - name: Backend high/critical audit gate
+        run: npm audit --audit-level=high
+      - name: UI clean install
+        working-directory: ui-shell
+        run: npm ci --no-audit --no-fund
+      - name: UI typecheck
+        working-directory: ui-shell
+        run: npm run typecheck
+      - name: UI production build
+        working-directory: ui-shell
+        run: npm run build
+      - name: UI high/critical audit gate
+        working-directory: ui-shell
+        run: npm audit --audit-level=high
+
+  container-smoke:
+    name: Production image and readiness smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    needs: app-and-ui
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          APP_DB_PASSWORD: ${{ env.APP_DB_PASSWORD }}
+          MIGRATOR_DB_PASSWORD: ${{ env.MIGRATOR_DB_PASSWORD }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sgip_bootstrap -d sgip_release"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGPASSWORD: release_bootstrap_only
+      SGIP_MIGRATIONS_DIR: ${{ github.workspace }}/db/migrations
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize production database contract
+        run: |
+          bash infra/postgres/05-create-roles.sh
+          bash infra/postgres/10-apply-migrations.sh
+          bash infra/postgres/20-create-app-role.sh
+      - name: Build immutable production image
+        run: docker build --pull -t sgip-api:${{ github.sha }} .
+      - name: Start image against PostgreSQL using runtime role
+        run: |
+          docker run -d --name sgip-api-smoke --network host \
+            -e NODE_ENV=production \
+            -e PORT=4000 \
+            -e DATABASE_URL=postgresql://sgip_app:release_app_only_ChangeMe123@127.0.0.1:5432/sgip_release \
+            -e JWT_SECRET="$JWT_SECRET" \
+            -e JWT_REFRESH_SECRET="$JWT_REFRESH_SECRET" \
+            -e SGIP_MIGRATIONS_DIR=/app/db/migrations \
+            sgip-api:${{ github.sha }}
+      - name: Require readiness attestation
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in {1..40}; do
+            if curl -fsS http://127.0.0.1:4000/health/ready > /tmp/ready.json; then
+              cat /tmp/ready.json
+              node -e '
+                const j=require("/tmp/ready.json");
+                if(j.ready!==true) process.exit(1);
+                if(!j.attestation?.migrationsVerified) process.exit(1);
+                if(!j.attestation?.rlsVerified) process.exit(1);
+                if(!j.attestation?.roleVerified) process.exit(1);
+                if(j.attestation?.role!=="sgip_app") process.exit(1);
+              '
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs sgip-api-smoke
+          exit 1
+      - name: Capture container logs
+        if: always()
+        run: docker logs sgip-api-smoke || true
+
+  iac-validation:
+    name: IaC and orchestration validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - name: Terraform format
+        run: terraform fmt -check -recursive infra/terraform/aws
+      - name: Terraform init without backend
+        working-directory: infra/terraform/aws
+        run: terraform init -backend=false -input=false
+      - name: Terraform validate
+        working-directory: infra/terraform/aws
+        run: terraform validate
+      - name: Production compose syntax
+        env:
+          POSTGRES_PASSWORD: dummy
+          APP_DB_PASSWORD: dummy
+          MIGRATOR_DB_PASSWORD: dummy
+          REDIS_PASSWORD: dummy
+          JWT_SECRET: dummy_jwt_secret_0123456789
+          JWT_REFRESH_SECRET: dummy_refresh_secret_0123456789
+          ANTHROPIC_API_KEY: ""
+          GRAFANA_PASSWORD: dummy
+        run: docker compose -f infra/docker/docker-compose.prod.yml config --quiet
+      - name: Kubernetes YAML parse
+        run: ruby -e 'require "yaml"; YAML.load_stream(File.read("infra/kubernetes/deployment.yml")); puts "KUBERNETES_YAML_PARSE=PASS"'
+
+  release-hardening-gate:
+    name: Release Hardening Gate
+    runs-on: ubuntu-24.04
+    if: always()
+    needs: [app-and-ui, container-smoke, iac-validation]
+    steps:
+      - name: Require all release-hardening jobs
+        env:
+          APP_UI: ${{ needs.app-and-ui.result }}
+          CONTAINER: ${{ needs.container-smoke.result }}
+          IAC: ${{ needs.iac-validation.result }}
+        run: |
+          echo "app-and-ui=$APP_UI"
+          echo "container-smoke=$CONTAINER"
+          echo "iac-validation=$IAC"
+          test "$APP_UI" = success
+          test "$CONTAINER" = success
+          test "$IAC" = success
+          echo "SGIP_RELEASE_HARDENING_GATE=PASS"
