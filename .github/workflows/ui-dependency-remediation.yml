@@ -60,3 +60,5 @@ jobs:
             git commit -m "security: upgrade Vite toolchain"
             git push origin HEAD:release/sgip-v4-production-hardening
           fi
+
+# Vite 8 compatibility retry
