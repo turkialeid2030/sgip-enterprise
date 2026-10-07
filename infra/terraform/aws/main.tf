@@ -133,7 +133,10 @@ resource "aws_msk_cluster" "governance_events" {
     }
   }
   encryption_info {
-    encryption_in_transit {\n      client_broker = "TLS"\n      in_cluster    = true\n    }
+    encryption_in_transit {
+      client_broker = "TLS"
+      in_cluster    = true
+    }
     encryption_at_rest_kms_key_arn = aws_kms_key.kafka.arn
   }
 }
