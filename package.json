@@ -21,7 +21,8 @@
     "docker:down": "docker-compose down",
     "docker:logs": "docker-compose logs -f api",
     "db:apply": "bash infra/postgres/10-apply-migrations.sh",
-    "verify:error-contract:static": "node scripts/verify-error-contract-static.cjs"
+    "verify:error-contract:static": "node scripts/verify-error-contract-static.cjs",
+    "verify:deployment": "node scripts/verify-deployment-readiness.cjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.97.0",
