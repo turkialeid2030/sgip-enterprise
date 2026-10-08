@@ -1,0 +1,135 @@
+name: SGIP Publish Qualified Container
+
+# Publishes an artifact, not an AWS deployment.
+on:
+  workflow_run:
+    workflows:
+      - SGIP Release Hardening
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+  packages: write
+
+concurrency:
+  group: sgip-qualified-container-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify and publish immutable container
+    if: >-
+      ${{
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main'
+      }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Require current main to match the release-hardening SHA
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')
+          if [[ "$current" != "$RELEASE_SHA" ]]; then
+            echo "BLOCKED: main has moved; publish only current main." >&2
+            exit 1
+          fi
+          echo "sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "SGIP_SOURCE_SHA=$RELEASE_SHA"
+
+      - name: Require independent production qualification for identical commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ steps.source.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            current=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')
+            if [[ "$current" != "$RELEASE_SHA" ]]; then
+              echo "BLOCKED: main changed while checking release gates." >&2
+              exit 1
+            fi
+            response=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/sgip-qualification.yml/runs?event=push&branch=main&per_page=50")
+            status=$(jq -r --arg commit "$RELEASE_SHA" '
+              [.workflow_runs[] | select(.head_sha == $commit)]
+              | sort_by(.run_number) | last
+              | if . == null then "missing"
+                else (.status + ":" + (.conclusion // "pending")) end
+            ' <<< "$response")
+            echo "SGIP_PRODUCTION_QUALIFICATION=$status"
+            if [[ "$status" == "completed:success" ]]; then exit 0; fi
+            if [[ "$status" == completed:* && "$status" != "completed:success" ]]; then
+              echo "BLOCKED: qualification did not pass." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "BLOCKED: matching qualification result unavailable." >&2
+          exit 1
+
+      - name: Checkout qualified revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+          persist-credentials: false
+
+      - name: Build candidate image
+        env:
+          RELEASE_SHA: ${{ steps.source.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          name=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          image="ghcr.io/$name:sha-$RELEASE_SHA"
+          echo "IMAGE_REF=$image" >> "$GITHUB_ENV"
+          docker build --pull --target production --label "org.opencontainers.image.revision=$RELEASE_SHA" -t "$image" .
+
+      - name: Scan exact candidate image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$HOME/.cache/trivy:/root/.cache/" \
+            aquasec/trivy:0.75.0 image --exit-code 1 --severity HIGH,CRITICAL --no-progress "$IMAGE_REF"
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish exact SHA-tag and record digest
+        env:
+          RELEASE_SHA: ${{ steps.source.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "$IMAGE_REF"
+          docker pull "$IMAGE_REF"
+          digest=$(docker image inspect "$IMAGE_REF" --format '{{join .RepoDigests "\n"}}' | grep '^ghcr.io/' | head -n 1)
+          if [[ "$digest" != ghcr.io/*@sha256:* ]]; then
+            echo "BLOCKED: registry digest could not be confirmed." >&2
+            exit 1
+          fi
+          printf 'image=%s\nrevision=%s\ndigest=%s\n' "$IMAGE_REF" "$RELEASE_SHA" "$digest" > published-image.txt
+          cat published-image.txt
+          echo "SGIP_IMAGE_PUBLISHED=PASS"
+
+      - name: Archive published digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: sgip-published-image-${{ steps.source.outputs.sha }}
+          path: published-image.txt
+          if-no-files-found: error
+          retention-days: 90
