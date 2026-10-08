@@ -1,71 +1,59 @@
-# SGIP Sovereign GRC OS — Production Realization Plan
+# SGIP V4 — خطة الاستكمال التشغيلي المعتمدة
 
-## Current State
-- 716/716 tests passing
-- 0 TypeScript errors  
-- 363 TypeScript files
-- 33 Executive API endpoints
-- 70+ Runtime engines
-- Production readiness: 92/100
+**القرار الحالي:** `TECHNICALLY QUALIFIED / NOT YET DEPLOYED`  
+**المرجع:** آخر Commit معتمد على `main` بعد اجتياز بوابتي `SGIP Production Qualification` و`SGIP Release Hardening`.  
+**مهم:** نجاح GitHub Actions لا يثبت إنشاء الموارد السحابية، ولا تسجيل النطاق، ولا نجاح الاستعادة من نسخة احتياطية.
 
-## Remaining 8 Points (Infra Gaps)
+## المكتمل والمثبت
 
-### P0: PostgreSQL Live (+3 pts)
-**Action:** `docker compose -f infra/docker/docker-compose.prod.yml up postgres`
-**Verify:** `psql $DATABASE_URL -c "SELECT current_setting('app.tenant_id', TRUE)"`
-**Terraform:** `infra/terraform/aws/main.tf` → `module.rds`
+- اختبارات TypeScript وJest والبناء الإنتاجي والاختبارات الثابتة.
+- E2E لحالات development وproduction وdatabase-down ضمن بيئة CI المعزولة.
+- migrations + PostgreSQL + RLS + FORCE RLS والتحقق من صلاحية دور `sgip_app`.
+- فحوص High/Critical للاعتماديات وصورة الحاوية.
+- تشغيل صورة Docker في CI والتحقق من `/health/ready`.
+- Terraform format/init/validate، وتحليل Kubernetes وCompose.
+- تجهيز نشر صورة ذات وسم Commit SHA على GHCR، مشروط بنجاح **البوابتين معًا للنسخة نفسها**. لا تعني جاهزية هذا المسار وجود صورة منشورة قبل نجاح GitHub Actions الخاص بالنشر.
 
-### P1: Kafka/NATS Event Bus (+2 pts)  
-**Action:** `docker compose up kafka`
-**Topics to create:**
-```
-kafka-topics.sh --create --topic governance.events --partitions 12 --replication-factor 3
-kafka-topics.sh --create --topic governance.dlq --partitions 3
-```
+## المرحلة الخارجية المتبقية
 
-### P1: JWT Refresh Tokens (+2 pts)
-**Action:** Add endpoint `POST /api/auth/refresh`
-**Est. effort:** 2 hours
+| المهمة | المسؤول | إثبات الإغلاق | الحالة |
+|---|---|---|---|
+| اعتماد حساب AWS والمنطقة والتكلفة والهوية المصرح لها | مالك الحساب / المالية / الأمن | Account ID + approved cost plan | مطلوب |
+| إعداد Terraform S3 state backend وIAM/OIDC وrunner له وصول خاص | مهندس المنصة | CI plan + IAM least privilege | مطلوب |
+| إنشاء VPC/EKS/RDS/ECR/KMS وما يلزم | مسؤول AWS بعد اعتماد التكلفة | Terraform apply logs + resource inventory | غير منفذ |
+| توفير Secrets Manager وDB roles دون وضع أسرار في Git | أمن المعلومات + DBA | Secrets references + role verification | غير منفذ |
+| نشر صورة Digest معروفة على EKS | فريق DevOps | image digest + rollout status | غير منفذ |
+| DNS وTLS والواجهات والصلاحيات | DevOps / الشبكات | شهادة صالحة + DNS test | غير منفذ |
+| تشغيل smoke/E2E وعزل المستأجرين على الهدف | QA + الأمن | signed run report | غير منفذ |
+| نسخ احتياطي واستعادة فعليان وقياس RTO/RPO | DBA / الاستمرارية | Restore drill evidence | غير منفذ |
+| قياس/تنبيهات/سجلات ومناوبة تشغيل وRollback تجريبي | SRE | alert delivery + rollback proof | غير منفذ |
+| الموافقة النهائية Go-Live | مالك المنتج + أمن المعلومات + التشغيل | محضر GO موقع | معلق |
 
-### P2: OpenTelemetry SDK (+1 pt)
-**Action:** `npm install @opentelemetry/sdk-node @opentelemetry/exporter-otlp-grpc`
-**Config:** `infra/observability/otel-config.yml` ready
+## تسلسل التنفيذ
 
-## Deployment Commands
+1. إقرار الحساب والمنطقة والتكلفة والمسؤوليات؛ وعدم إرسال مفاتيح سرية إلى المحادثة أو Git.
+2. تجهيز IAM/OIDC الخاص بـGitHub Actions أو منصة نشر داخل VPC، وسياسة الأقل صلاحية.
+3. تشغيل `terraform plan` ومراجعة الخطة أمنيًا وماليًا؛ تطبيق `terraform apply` **فقط** بعد الاعتماد.
+4. إنشاء قاعدة البيانات وتطبيق المسار المعتمد في `infra/postgres/` بواسطة migrator، وليس مستخدم Runtime.
+5. نشر صورة معروفة بـSHA أو Digest، ثم فحص readiness وTenant Isolation وError Contract على الهدف.
+6. توثيق Restore Drill وRollback وDNS/TLS والرصد والتنبيهات.
+7. إصدار قرار `GO` أو `HOLD` مستند إلى الأدلة.
 
-```bash
-# Option A: Docker Compose (fastest)
-cp .env.example .env   # Fill in secrets
-docker compose -f infra/docker/docker-compose.prod.yml up -d
-npm test  # Verify 716/716 still pass against live DB
+## ضوابط إيقاف حاكمة
 
-# Option B: Kubernetes (production)
-kubectl apply -f infra/kubernetes/deployment.yml
-helm upgrade --install sgip-api infra/helm/sgip-api/ -n sgip-production -f infra/helm/sgip-api/values.yaml
+- لا يجوز استخدام `qualification-placeholder` أو وسوم `latest` للنشر.
+- لا يجوز اعتماد نتيجة CI المحلية كدليل استعادة قاعدة بيانات إنتاجية.
+- لا يجوز إسناد صلاحيات `SUPERUSER` أو `BYPASSRLS` إلى دور التطبيق.
+- عدم وجود AWS فعلي أو أسرار أو صلاحيات أو موازن حمل لا يُعالج بادعاء أنه «تم النشر».
+- أي فشل في اتصال Tenant A بحدود Tenant B أو أي تسريب للبيانات يفرض `HOLD` فورًا.
 
-# Option C: Terraform full stack (AWS)
-cd infra/terraform/aws
-terraform init
-terraform apply -var-file=prod.tfvars
-```
+## الملفات المرجعية
 
-## Post-Deployment Verification
+- `infra/DEPLOYMENT.md` — عقد النشر المعتمد.
+- `PRODUCTION_HANDOFF.md` — قائمة التحقق وأوامر الفريق.
+- `infra/terraform/aws/` — البنية المرجعية، وليست دليلًا على وجودها.
+- `.github/workflows/sgip-qualification.yml` — بوابة التأهيل.
+- `.github/workflows/sgip-release-hardening.yml` — بوابة التحصين.
+- `.github/workflows/sgip-publish-qualified-container.yml` — صورة قابلة للتتبع بعد نجاح البوابتين.
 
-```bash
-# 1. Health check
-curl https://api.sgip.internal/health
-# → {"status":"healthy","version":"8.0","uptime":...}
-
-# 2. Integrity certification
-curl -X POST https://api.sgip.internal/api/executive/integrity-certification \
-  -H "Authorization: Bearer $TOKEN"
-# → {"status":"certified","overallScore":92}
-
-# 3. Full governance cycle
-curl https://api.sgip.internal/api/executive/cockpit \
-  -H "Authorization: Bearer $TOKEN"
-# → Complete governance state
-
-# 4. Tenant isolation test
-# Create two tenants, verify no cross-tenant data leakage
-```
+**التصنيف الصحيح قبل إنشاء البنية السحابية والتحقق منها:** `READY FOR DEPLOYMENT — EXTERNAL TARGET REQUIRED`.
