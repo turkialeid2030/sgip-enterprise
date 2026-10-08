@@ -17,6 +17,12 @@ add("DOCKER_LOCKFILE_INCLUDED", /package-lock\.json/.test(docker));
 add("DOCKER_NON_ROOT", /USER sgip/.test(docker));
 add("DOCKER_RUNTIME_NPM_REMOVED", /rm -rf \/usr\/local\/lib\/node_modules\/npm/.test(docker));
 add("DOCKER_READINESS_HEALTHCHECK", /\/health\/ready/.test(docker));
+const dockerContext = read(".dockerignore");
+add("DOCKER_CONTEXT_EXCLUDES_GIT", /(^|\\n)\\.git(\\n|$)/.test(dockerContext));
+add("DOCKER_CONTEXT_EXCLUDES_NODE_MODULES", /\\*\\*\\/node_modules/.test(dockerContext));
+add("DOCKER_CONTEXT_EXCLUDES_ENV_FILES", /\\*\\*\\/\\.env\\.\\*/.test(dockerContext));
+add("DOCKER_CONTEXT_EXCLUDES_PRIVATE_KEYS", /\\*\\*\\/\\*\\.pem/.test(dockerContext) && /\\*\\*\\/\\*\\.key/.test(dockerContext));
+
 
 const prodCompose = read("infra/docker/docker-compose.prod.yml");
 add("PROD_COMPOSE_IMMUTABLE_APP_TAG", /SGIP_IMAGE_TAG:\?SGIP_IMAGE_TAG required/.test(prodCompose));
